@@ -1,4 +1,3 @@
-
 import io
 import re
 from typing import Optional
@@ -12,8 +11,6 @@ st.set_page_config(page_title="Plataforma de Remuneraciones - Asesorías Contabl
 # ==========================================================
 # 1. UTILIDADES Y EXTRACCIÓN CERTIFICADA
 # ==========================================================
-SHEET_NAME = "SUELDOS 2026"
-
 RUT_RE = re.compile(r"(\d{1,2}(?:\.\d{3}){2}-[\dkK]|\d{7,8}-[\dkK])")
 
 def normalize_rut(value) -> str:
@@ -149,10 +146,18 @@ def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
 
 def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, cargas_dict: dict, bonos_dict: dict) -> bytes:
     wb = load_workbook(io.BytesIO(template_bytes))
-    if SHEET_NAME not in wb.sheetnames:
-        raise ValueError(f"No se encontró la pestaña '{SHEET_NAME}' en el Excel del cliente.")
     
-    ws = wb[SHEET_NAME]
+    # Búsqueda flexible de pestaña (insensible a mayúsculas/minúsculas o usa la primera activa)
+    target_sheet = None
+    for name in wb.sheetnames:
+        if name.strip().lower() in ["sueldos 2026", "sueldos2026", "remuneraciones"]:
+            target_sheet = name
+            break
+    
+    if not target_sheet:
+        target_sheet = wb.sheetnames[0]  # Toma la primera pestaña por defecto si no coincide exacto
+        
+    ws = wb[target_sheet]
 
     # Detección automática de columnas por encabezados
     col_sis, col_afc, col_isl, col_rent, col_s_soc, col_s_01 = 14, 15, 16, 17, 18, 19
