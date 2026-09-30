@@ -1,7 +1,7 @@
-
 streamlit
 pandas
 openpyxl
 pypdf
 plotly
 sqlalchemy
+python-docx
