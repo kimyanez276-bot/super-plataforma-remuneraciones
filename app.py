@@ -38,53 +38,24 @@ def formato_cl(monto) -> str:
     return f"{int(round(monto)):,}".replace(",", ".")
 
 def obtener_feriados_chile() -> set:
-    """
-    Retorna un conjunto (set) de objetos datetime.date con todos los feriados 
-    oficiales de Chile (fijos y móviles aproximados/calculados) desde 2024 hasta 2030.
-    """
     feriados = set()
-    
-    # Lista de feriados fijos recurrentes mes/día para cualquier año
     feriados_fijos = [
-        (1, 1),   # Año Nuevo
-        (5, 1),   # Día del Trabajador
-        (5, 21),  # Glorias Navales
-        (6, 29),  # San Pedro y San Pablo
-        (7, 16),  # Virgen del Carmen
-        (8, 15),  # Asunción de la Virgen
-        (9, 18),  # Independencia Nacional
-        (9, 19),  # Glorias del Ejército
-        (10, 12), # Encuentro de Dos Mundos
-        (10, 31), # Iglesias Evangélicas y Protestantes
-        (11, 1),  # Todos los Santos
-        (12, 8),  # Inmaculada Concepción
-        (12, 25), # Navidad
+        (1, 1), (5, 1), (5, 21), (6, 29), (7, 16), (8, 15), 
+        (9, 18), (9, 19), (10, 12), (10, 31), (11, 1), (12, 8), (12, 25)
     ]
     
     for anio in range(2024, 2031):
-        # Agregar feriados fijos
         for mes, dia in feriados_fijos:
             try:
                 feriados.add(datetime(anio, mes, dia).date())
             except ValueError:
                 pass
                 
-        # Feriados específicos de Fiestas Patrias (Viernes 18 o 19 sándwiches legales si aplica)
-        # 2024: 18, 19, 20 (extra)
-        if anio == 2024:
-            feriados.add(datetime(2024, 9, 20).date())
-        # 2025: 18, 19, 17 (extra)
-        elif anio == 2025:
-            feriados.add(datetime(2025, 9, 17).date())
-        # 2026: 18, 19, 21 (lunes extra)
-        elif anio == 2026:
-            feriados.add(datetime(2026, 9, 21).date())
-        # 2027: 18 (sábado), 19 (domingo), 17 (viernes extra)
-        elif anio == 2027:
-            feriados.add(datetime(2027, 9, 17).date())
+        if anio == 2024: feriados.add(datetime(2024, 9, 20).date())
+        elif anio == 2025: feriados.add(datetime(2025, 9, 17).date())
+        elif anio == 2026: feriados.add(datetime(2026, 9, 21).date())
+        elif anio == 2027: feriados.add(datetime(2027, 9, 17).date())
             
-        # Feriados móviles aproximados (Viernes Santo y Sábado Santo)
-        # Cálculo base de Pascuas por año (algoritmo simplificado de fecha de Pascua)
         a = anio % 19
         b = anio // 100
         c = anio % 100
@@ -101,30 +72,28 @@ def obtener_feriados_chile() -> set:
         dia_pascua = ((h + L - 7 * m + 114) % 31) + 1
         
         domingo_pascua = datetime(anio, mes_pascua, dia_pascua).date()
-        viernes_santo = domingo_pascua - timedelta(days=2)
-        sabado_santo = domingo_pascua - timedelta(days=1)
+        feriados.add(domingo_pascua - timedelta(days=2)) # Viernes Santo
+        feriados.add(domingo_pascua - timedelta(days=1)) # Sábado Santo
         
-        feriados.add(viernes_santo)
-        feriados.add(sabado_santo)
-        
-        # Elecciones presidenciales / parlamentarias móviles (ej: noviembre cada 4 años)
-        if anio in [2025, 2029]: # Segunda vuelta o elecciones
-            try:
-                feriados.add(datetime(anio, 11, 23).date()) # Ejemplo domingo de elección o feriado legal asociado
-            except ValueError:
-                pass
+        if anio in [2025, 2029]:
+            try: feriados.add(datetime(anio, 11, 23).date())
+            except ValueError: pass
 
     return feriados
 
-def calcular_dias_calendario_con_feriados(fecha_inicio_conteo, dias_habiles_objetivo, regimen_semana):
+def calcular_dias_calendario_con_desglose(fecha_inicio_conteo, dias_habiles_objetivo, regimen_semana):
     """
-    Cuenta día por día en el calendario real saltando domingos, sábados (si aplica) 
-    y festivos oficiales de Chile registrados en la lista.
+    Simula el calendario día por día y retorna un diccionario con el desglose exacto:
+    dias corridos, domingos, sábados inhábiles y feriados chilenos.
     """
     feriados_chile = obtener_feriados_chile()
     current_date = fecha_inicio_conteo + timedelta(days=1)
     habiles_acumulados = 0.0
     dias_corridos_reales = 0
+    
+    conteo_domingos = 0
+    conteo_sabados = 0
+    conteo_feriados = 0
     
     while habiles_acumulados < dias_habiles_objetivo:
         weekday = current_date.weekday() # 0: Lunes ... 5: Sábado, 6: Domingo
@@ -132,10 +101,20 @@ def calcular_dias_calendario_con_feriados(fecha_inicio_conteo, dias_habiles_obje
         
         es_dia_habil_laboral = False
         if regimen_semana == "Lunes a Viernes (5 días)":
-            if weekday < 5 and not es_feriado:
+            if weekday == 6: # Domingo
+                conteo_domingos += 1
+            elif weekday == 5: # Sábado
+                conteo_sabados += 1
+            elif es_feriado:
+                conteo_feriados += 1
+            else:
                 es_dia_habil_laboral = True
         else: # Lunes a Sábado (6 días)
-            if weekday < 6 and not es_feriado:
+            if weekday == 6: # Domingo
+                conteo_domingos += 1
+            elif es_feriado:
+                conteo_feriados += 1
+            else:
                 es_dia_habil_laboral = True
                 
         if es_dia_habil_laboral:
@@ -151,7 +130,12 @@ def calcular_dias_calendario_con_feriados(fecha_inicio_conteo, dias_habiles_obje
         if dias_corridos_reales > 3650:
             break
             
-    return dias_corridos_reales
+    return {
+        "dias_corridos": dias_corridos_reales,
+        "domingos": conteo_domingos,
+        "sabados": conteo_sabados,
+        "feriados": conteo_feriados
+    }
 
 def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -458,11 +442,14 @@ elif menu == "Calculadora y Finiquitos DT":
         if regimen_conteo == "Cálculo Matemático Estándar (Factor 1.4)":
             dias_feriado_corridos = dias_vacaciones_pendientes * (7 / 5)
             metodo_texto = "Matemático Estándar (× 1,4)"
+            desglose_info = None
         elif regimen_conteo == "Conteo Día a Día + Feriados Chilenos (Lunes a Viernes)":
-            dias_feriado_corridos = calcular_dias_calendario_con_feriados(fecha_termino, dias_vacaciones_pendientes, "Lunes a Viernes (5 días)")
+            desglose_info = calcular_dias_calendario_con_desglose(fecha_termino, dias_vacaciones_pendientes, "Lunes a Viernes (5 días)")
+            dias_feriado_corridos = desglose_info["dias_corridos"]
             metodo_texto = "Calendario Real + Feriados (Lunes a Viernes)"
         else:
-            dias_feriado_corridos = calcular_dias_calendario_con_feriados(fecha_termino, dias_vacaciones_pendientes, "Lunes a Sábado (6 días)")
+            desglose_info = calcular_dias_calendario_con_desglose(fecha_termino, dias_vacaciones_pendientes, "Lunes a Sábado (6 días)")
+            dias_feriado_corridos = desglose_info["dias_corridos"]
             metodo_texto = "Calendario Real + Feriados (Lunes a Sábado)"
 
         base_calculo = sueldo_base + gratificacion
@@ -487,6 +474,12 @@ elif menu == "Calculadora y Finiquitos DT":
 
         res_c1, res_c2 = st.columns(2)
         with res_c1:
+            # Texto descriptivo para feriado proporcional con desglose si aplica
+            if desglose_info:
+                detalle_dias_str = f"Equivale a **{dias_feriado_corridos} días corridos** en total<br>(Incluye: {int(dias_vacaciones_pendientes)} días hábiles, {desglose_info['domingos']} domingos, {desglose_info['sabados']} sábados y {desglose_info['feriados']} feriados)"
+            else:
+                detalle_dias_str = f"Equivale a **{dias_feriado_corridos:.1f} días corridos**"
+
             st.markdown(f"""
             ### 💼 Prestaciones Principales
             * **Días Trabajados en el Mes ({dias_pendientes} días):**  
@@ -494,9 +487,10 @@ elif menu == "Calculadora y Finiquitos DT":
             
             * **Feriado Proporcional ({dias_vacaciones_pendientes} días hábiles):**  
               *Método:* `{metodo_texto}`  
-              Equivale a `{dias_feriado_corridos:.1f} días corridos`  
-              `{dias_feriado_corridos:.1f} × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_feriado)}**
-            """)
+              {detalle_dias_str}  
+              `{dias_feriado_corridos} × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_feriado)}**
+            """, unsafe_allow_html=True)
+            
         with res_c2:
             st.markdown(f"""
             ### ⚖️ Indemnizaciones y Total
@@ -514,7 +508,7 @@ elif menu == "Calculadora y Finiquitos DT":
         )
         
         st.markdown("---")
-        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito incluyendo feriados nacionales chilenos!")
+        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito incluyendo el desglose de días hábiles y no hábiles!")
         st.download_button(
             label="📥 Descargar Finiquito Oficial en Word (.docx)",
             data=word_bytes,
