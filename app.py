@@ -32,6 +32,10 @@ def safe_int(value):
     except (TypeError, ValueError):
         return 0
 
+def formato_cl(monto) -> str:
+    """Formatea números enteros con puntos como separadores de miles (ej: 1.242.153)"""
+    return f"{int(monto):,}".replace(",", ".")
+
 def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
     reader = PdfReader(io.BytesIO(pdf_bytes))
     workers_data = {}
@@ -160,7 +164,7 @@ def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, c
     output.seek(0)
     return output.getvalue()
 
-def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, monto_feriado, indem_anos):
+def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, total_feriado_pesos, total_dias_feriado_corridos, indem_anos):
     doc = Document()
     
     p_title = doc.add_paragraph()
@@ -174,19 +178,33 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     
     doc.add_paragraph(f"PRIMERO: El presente contrato termina por la causal establecida en el {causal}.")
     doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
-    doc.add_paragraph(f"• Remuneración días trabajados en el mes: ${monto_dias:,.0f}")
-    doc.add_paragraph(f"• Feriado Proporcional: ${monto_feriado:,.0f}")
-    doc.add_paragraph(f"• Indemnización por Años de Servicio: ${indem_anos:,.0f}")
+    doc.add_paragraph(f"• Remuneración días trabajados en el mes ({dias_trab} días): ${formato_cl(monto_dias)}")
+    doc.add_paragraph(f"• Feriado Proporcional ({total_dias_feriado_corridos:.1f} días corridos): ${formato_cl(total_feriado_pesos)}")
+    doc.add_paragraph(f"• Indemnización por Años de Servicio: ${formato_cl(indem_anos)}")
     
-    total_finiquito = monto_dias + monto_feriado + indem_anos
+    total_finiquito = monto_dias + total_feriado_pesos + indem_anos
     p_tot = doc.add_paragraph()
-    run_tot = p_tot.add_run(f"TOTAL A PAGAR: ${total_finiquito:,.0f}")
+    run_tot = p_tot.add_run(f"TOTAL A PAGAR: ${formato_cl(total_finiquito)}")
     run_tot.bold = True
     
     doc.add_paragraph("TERCERO: El/la trabajador/a declara recibir a su entera satisfacción el pago indicado, sin tener cargo ni reclamación posterior alguna que formular.")
     
-    doc.add_paragraph("\n\n__________________________________\nFirma Empleador")
-    doc.add_paragraph("__________________________________\nFirma Trabajador/a")
+    doc.add_paragraph() # Espacio
+    
+    # Firmas paralelas en tabla invisible (1 fila, 2 celdas)
+    table = doc.add_table(rows=1, cols=2)
+    table.autofit = False
+    
+    cell_left = table.cell(0, 0)
+    cell_right = table.cell(0, 1)
+    
+    p_left = cell_left.paragraphs[0]
+    p_left.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_left.add_run("__________________________________\nFirma Empleador")
+    
+    p_right = cell_right.paragraphs[0]
+    p_right.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_right.add_run("__________________________________\nFirma Trabajador / a")
     
     output = io.BytesIO()
     doc.save(output)
@@ -239,14 +257,13 @@ elif menu == "Procesar Previred & Excel":
 elif menu == "Calculadora y Finiquitos DT":
     st.header("⚖️ Simulador, Cálculo y Redacción de Finiquitos")
     
-    # 💡 GUÍA / RECORDATORIO CLARO DE CAUSALES
     with st.expander("📖 🔍 Recordatorio y Guía de Causales de Término (Normativa DT Chile)", expanded=False):
         st.markdown("""
-        * **Art. 161 N° 1 (Con Aviso Previo):** Necesidades de la empresa (baja ventas, reestructuración). Se avisa con 30 días de anticipación. **No se paga mes de aviso**, pero sí años de servicio y feriado.
-        * **Art. 161 N° 1 (Sin Aviso / Sustitutiva):** Despido inmediato por necesidades de la empresa. **Se debe pagar el mes de aviso** + años de servicio + feriado. Permite descontar la AFC del empleador.
-        * **Art. 159 N° 1 (Mutuo Acuerdo):** Acuerdo entre empleador y trabajador. Las indemnizaciones son voluntarias o pactadas. No se descuenta AFC a menos que se acuerde expresamente según la ley.
-        * **Art. 159 N° 2 (Renuncia Voluntaria):** El trabajador dimite por iniciativa propia. Solo se pagan días trabajados y feriado proporcional. **Cero indemnización y no se descuenta AFC.**
-        * **Art. 160 (Causales de Caducidad):** Faltas graves del trabajador (inasistencias, robos, etc.). **No da derecho a indemnización ni feriado proporcional** (salvo días efectivamente trabajados del mes).
+        * **Art. 161 - Necesidades (Con Aviso Previo):** Se avisa con 30 días. **No se paga mes de aviso**, pero sí años de servicio y feriado.
+        * **Art. 161 - Necesidades (Sin Aviso / Mes Sustitutivo):** Despido inmediato. **Se paga el mes de aviso** + años de servicio + feriado. Descuenta AFC empleador.
+        * **Art. 159 N° 1 - Mutuo Acuerdo:** Acuerdo mutuo. Indemnizaciones pactadas libremente.
+        * **Art. 159 N° 2 - Renuncia Voluntaria:** El trabajador dimite. Solo días trabajados y feriado proporcional. **Cero indemnización y sin descuento AFC.**
+        * **Art. 160 - Causales de Caducidad:** Faltas graves. **Sin indemnización ni feriado proporcional** (salvo días trabajados).
         """)
 
     modo_trabajador = st.radio("📂 Origen de los Datos del Trabajador", ["Trabajador Libre / Fuera de Base de Datos", "Seleccionar de Base de Datos Cliente"])
@@ -256,11 +273,11 @@ elif menu == "Calculadora y Finiquitos DT":
         with col_w1:
             nombre_trab = st.text_input("👤 Nombre Completo", value="María González")
             rut_trab = st.text_input("🆔 RUT Trabajador", value="15.123.456-7")
-            fecha_inicio = st.date_input("📅 Fecha Inicio Contrato")
+            fecha_inicio = st.date_input("📅 Fecha Inicio Contrato", value=pd.to_datetime("2024-01-01").date())
         with col_w2:
             empresa_nombre = st.text_input("🏢 Empresa Empleador", value="Empresa Externa")
             empresa_rut = st.text_input("🆔 RUT Empleador", value="76.123.456-8")
-            fecha_termino = st.date_input("📅 Fecha Término / Despido")
+            fecha_termino = st.date_input("📅 Fecha Término / Despido", value=pd.to_datetime("2026-09-30").date())
     else:
         st.info("ℹ️ Módulo vinculado a Formula Center SpA.")
         nombre_trab = st.selectbox("Seleccionar Trabajador", ["Rodolfo Álvarez", "Martín Cabrera", "Nicolás Contreras", "Rodrigo Leiva", "Anggie Medina", "David Urrutia"])
@@ -271,7 +288,7 @@ elif menu == "Calculadora y Finiquitos DT":
         with col_w1:
             fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime("2024-01-01").date())
         with col_w2:
-            fecha_termino = st.date_input("📅 Fecha Término")
+            fecha_termino = st.date_input("📅 Fecha Término", value=pd.to_datetime("2026-09-30").date())
 
     col1, col2 = st.columns(2)
     with col1:
@@ -281,7 +298,17 @@ elif menu == "Calculadora y Finiquitos DT":
     with col2:
         dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes", min_value=0, max_value=30, value=10)
         
-        # Opciones cortas y claras para que no se corten visualmente
+        # 🏖️ Control manual de vacaciones proporcionales y pendientes
+        delta_dias_gen = (fecha_termino - fecha_inicio).days
+        meses_trab_gen = max(0, delta_dias_gen / 30.416)
+        feriado_proporcional_calculado = meses_trab_gen * 1.25
+        
+        dias_vacaciones_pendientes = st.number_input(
+            "🏖️ Días Hábiles de Vacaciones Acumuladas / Pendientes (Ingresar Manual)", 
+            min_value=0.0, value=float(round(feriado_proporcional_calculado, 1)), step=0.5,
+            help="El sistema calcula el proporcional por el tiempo trabajado, pero puedes ajustarlo manualmente si el trabajador tiene días pendientes de años anteriores."
+        )
+
         opciones_causal = [
             "Art. 161 - Necesidades (Con Aviso Previo)",
             "Art. 161 - Necesidades (Sin Aviso / Mes Sustitutivo)",
@@ -289,16 +316,15 @@ elif menu == "Calculadora y Finiquitos DT":
             "Art. 159 N° 2 - Renuncia Voluntaria",
             "Art. 160 - Causales de Caducidad (Sin Indemnización)"
         ]
-        causal = st.selectbox("📋 Causal de Término de Contrato", opciones_causas if 'opciones_causas' in locals() else opciones_causal)
+        causal = st.selectbox("📋 Causal de Término de Contrato", opciones_causal)
 
     if st.button("📊 Calcular y Generar Documento Word", type="primary"):
         delta_dias = (fecha_termino - fecha_inicio).days
         anos_servicio = delta_dias / 365.25
         anos_enteros = int(anos_servicio)
         
-        meses_trabajados = delta_dias / 30.416
-        dias_feriado_habiles = meses_trabajados * 1.25
-        dias_feriado_corridos = dias_feriado_habiles * (7 / 5)
+        # Conversión de días hábiles de vacaciones a días corridos para el pago
+        dias_feriado_corridos = dias_vacaciones_pendientes * (7 / 5)
 
         base_calculo = sueldo_base + gratificacion
         rem_diaria = base_calculo / 30
@@ -306,27 +332,30 @@ elif menu == "Calculadora y Finiquitos DT":
         monto_dias_trabajados = rem_diaria * dias_pendientes
         monto_feriado = rem_diaria * dias_feriado_corridos
         
-        # Lógica de indemnización según causal corta
         indem_anos = 0
         if "161" in causal or "Mutuo" in causal:
             indem_anos = base_calculo * anos_enteros
 
         st.markdown("---")
-        st.subheader("📑 Resultados del Cálculo")
+        st.subheader("📑 Resultados del Cálculo (Montos en formato oficial)")
         c1, c2, c3 = st.columns(3)
         with c1:
             st.metric("Antigüedad", f"{anos_enteros} años")
-            st.metric("Base Cálculo", f"${base_calculo:,.0f}")
+            st.metric("Base Cálculo", f"${formato_cl(base_calculo)}")
         with c2:
-            st.metric("Días Trabajados", f"${monto_dias_trabajados:,.0f}")
-            st.metric("Feriado Proporcional", f"${monto_feriado:,.0f}")
+            st.metric("Días Trabajados", f"${formato_cl(monto_dias_trabajados)}")
+            st.metric("Feriado Proporcional", f"${formato_cl(monto_feriado)} ({dias_vacaciones_pendientes} días hábiles)")
         with c3:
-            st.metric("Años de Servicio", f"${indem_anos:,.0f}")
+            st.metric("Años de Servicio", f"${formato_cl(indem_anos)}")
 
-        word_bytes = generate_finiquito_word(nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, base_calculo, dias_pendientes, monto_dias_trabajados, monto_feriado, indem_anos)
+        word_bytes = generate_finiquito_word(
+            nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, 
+            base_calculo, dias_pendientes, monto_dias_trabajados, 
+            monto_feriado, dias_feriado_corridos, indem_anos
+        )
         
         st.markdown("---")
-        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito!")
+        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito con puntos en los montos y firmas paralelas!")
         st.download_button(
             label="📥 Descargar Finiquito Oficial en Word (.docx)",
             data=word_bytes,
