@@ -239,29 +239,39 @@ elif menu == "Procesar Previred & Excel":
 elif menu == "Calculadora y Finiquitos DT":
     st.header("⚖️ Simulador, Cálculo y Redacción de Finiquitos")
     
-    modo_trabajador = st.radio("📂 Selecciona el Origen de los Datos del Trabajador", ["Trabajador Libre / Fuera de Base de Datos", "Seleccionar de Base de Datos Cliente"])
+    # 💡 GUÍA / RECORDATORIO CLARO DE CAUSALES
+    with st.expander("📖 🔍 Recordatorio y Guía de Causales de Término (Normativa DT Chile)", expanded=False):
+        st.markdown("""
+        * **Art. 161 N° 1 (Con Aviso Previo):** Necesidades de la empresa (baja ventas, reestructuración). Se avisa con 30 días de anticipación. **No se paga mes de aviso**, pero sí años de servicio y feriado.
+        * **Art. 161 N° 1 (Sin Aviso / Sustitutiva):** Despido inmediato por necesidades de la empresa. **Se debe pagar el mes de aviso** + años de servicio + feriado. Permite descontar la AFC del empleador.
+        * **Art. 159 N° 1 (Mutuo Acuerdo):** Acuerdo entre empleador y trabajador. Las indemnizaciones son voluntarias o pactadas. No se descuenta AFC a menos que se acuerde expresamente según la ley.
+        * **Art. 159 N° 2 (Renuncia Voluntaria):** El trabajador dimite por iniciativa propia. Solo se pagan días trabajados y feriado proporcional. **Cero indemnización y no se descuenta AFC.**
+        * **Art. 160 (Causales de Caducidad):** Faltas graves del trabajador (inasistencias, robos, etc.). **No da derecho a indemnización ni feriado proporcional** (salvo días efectivamente trabajados del mes).
+        """)
+
+    modo_trabajador = st.radio("📂 Origen de los Datos del Trabajador", ["Trabajador Libre / Fuera de Base de Datos", "Seleccionar de Base de Datos Cliente"])
     
     if modo_trabajador == "Trabajador Libre / Fuera de Base de Datos":
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            nombre_trab = st.text_input("👤 Nombre Completo del Trabajador", value="María González")
-            rut_trab = st.text_input("🆔 RUT del Trabajador", value="15.123.456-7")
-            fecha_inicio = st.date_input("📅 Fecha de Inicio de Contrato")
+            nombre_trab = st.text_input("👤 Nombre Completo", value="María González")
+            rut_trab = st.text_input("🆔 RUT Trabajador", value="15.123.456-7")
+            fecha_inicio = st.date_input("📅 Fecha Inicio Contrato")
         with col_w2:
-            empresa_nombre = st.text_input("🏢 Razón Social Empleador", value="Empresa Externa / Asesoría")
+            empresa_nombre = st.text_input("🏢 Empresa Empleador", value="Empresa Externa")
             empresa_rut = st.text_input("🆔 RUT Empleador", value="76.123.456-8")
-            fecha_termino = st.date_input("📅 Fecha de Término / Despido")
+            fecha_termino = st.date_input("📅 Fecha Término / Despido")
     else:
-        st.info("ℹ️ Módulo vinculado a la base de clientes actual (Formula Center SpA).")
+        st.info("ℹ️ Módulo vinculado a Formula Center SpA.")
         nombre_trab = st.selectbox("Seleccionar Trabajador", ["Rodolfo Álvarez", "Martín Cabrera", "Nicolás Contreras", "Rodrigo Leiva", "Anggie Medina", "David Urrutia"])
         rut_trab = "13.599.716-1"
         empresa_nombre = "Formula Center SpA"
         empresa_rut = "77.597.719-1"
         col_w1, col_w2 = st.columns(2)
         with col_w1:
-            fecha_inicio = st.date_input("📅 Fecha de Inicio", value=pd.to_datetime("2024-01-01").date())
+            fecha_inicio = st.date_input("📅 Fecha Inicio", value=pd.to_datetime("2024-01-01").date())
         with col_w2:
-            fecha_termino = st.date_input("📅 Fecha de Término")
+            fecha_termino = st.date_input("📅 Fecha Término")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -269,14 +279,17 @@ elif menu == "Calculadora y Finiquitos DT":
         gratificacion = st.number_input("🎁 Gratificación Mensual ($)", min_value=0, value=180000, step=5000)
         metodo_promedio = st.radio("🔍 Base de Cálculo", ["Promedio Últimos 3 Meses", "Promedio Últimos 6 Meses"])
     with col2:
-        dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes del Despido", min_value=0, max_value=30, value=10)
-        causal = st.selectbox("📋 Causal de Término", [
-            "Art. 161 N° 1 - Necesidades de la Empresa (Con Aviso)",
-            "Art. 161 N° 1 - Necesidades de la Empresa (Sin Aviso / Sustitutiva)",
+        dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes", min_value=0, max_value=30, value=10)
+        
+        # Opciones cortas y claras para que no se corten visualmente
+        opciones_causal = [
+            "Art. 161 - Necesidades (Con Aviso Previo)",
+            "Art. 161 - Necesidades (Sin Aviso / Mes Sustitutivo)",
             "Art. 159 N° 1 - Mutuo Acuerdo",
             "Art. 159 N° 2 - Renuncia Voluntaria",
-            "Art. 160 - Causales de Caducidad"
-        ])
+            "Art. 160 - Causales de Caducidad (Sin Indemnización)"
+        ]
+        causal = st.selectbox("📋 Causal de Término de Contrato", opciones_causas if 'opciones_causas' in locals() else opciones_causal)
 
     if st.button("📊 Calcular y Generar Documento Word", type="primary"):
         delta_dias = (fecha_termino - fecha_inicio).days
@@ -292,14 +305,18 @@ elif menu == "Calculadora y Finiquitos DT":
         
         monto_dias_trabajados = rem_diaria * dias_pendientes
         monto_feriado = rem_diaria * dias_feriado_corridos
-        indem_anos = base_calculo * anos_enteros if "161" in causal or "Mutuo" in causal else 0
+        
+        # Lógica de indemnización según causal corta
+        indem_anos = 0
+        if "161" in causal or "Mutuo" in causal:
+            indem_anos = base_calculo * anos_enteros
 
         st.markdown("---")
         st.subheader("📑 Resultados del Cálculo")
         c1, c2, c3 = st.columns(3)
         with c1:
             st.metric("Antigüedad", f"{anos_enteros} años")
-            st.metric("Base Cálculo ({})".format(metodo_promedio), f"${base_calculo:,.0f}")
+            st.metric("Base Cálculo", f"${base_calculo:,.0f}")
         with c2:
             st.metric("Días Trabajados", f"${monto_dias_trabajados:,.0f}")
             st.metric("Feriado Proporcional", f"${monto_feriado:,.0f}")
