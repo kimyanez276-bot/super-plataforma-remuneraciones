@@ -5,6 +5,9 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 from pypdf import PdfReader
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 st.set_page_config(page_title="Plataforma de Remuneraciones - Asesorías Contables", layout="wide")
 
@@ -20,19 +23,6 @@ def normalize_rut(value) -> str:
     if len(raw) < 2:
         return ""
     return f"{raw[:-1]}-{raw[-1].upper()}"
-
-def parse_clp(value) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)) and not pd.isna(value):
-        return int(round(value))
-    text = str(value).strip().replace("$", "").replace(" ", "")
-    if not text or "%" in text:
-        return None
-    text = text.replace(".", "")
-    if text.isdigit():
-        return int(text)
-    return None
 
 def safe_int(value):
     try:
@@ -83,11 +73,10 @@ def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
                         continue
                     after_rut = line[m.end():]
                     nums = [int(n.replace(".", "")) for n in re.findall(r"\b\d{1,3}(?:\.\d{3})+\b|\b\d+\b", after_rut)]
-                    if len(nums) >= 9:
-                        if rut in workers_data:
-                            workers_data[rut]["cotiz_afp"] = nums[1]
-                            workers_data[rut]["afc_trab"] = nums[7] if len(nums) >= 8 else 0
-                            workers_data[rut]["afc_emp"] = nums[8] if len(nums) >= 9 else 0
+                    if len(nums) >= 9 and rut in workers_data:
+                        workers_data[rut]["cotiz_afp"] = nums[1]
+                        workers_data[rut]["afc_trab"] = nums[7] if len(nums) >= 8 else 0
+                        workers_data[rut]["afc_emp"] = nums[8] if len(nums) >= 9 else 0
 
         if "Instituto de Seguridad Laboral" in text or "ISL" in text:
             for line in lines:
@@ -171,6 +160,39 @@ def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, c
     output.seek(0)
     return output.getvalue()
 
+def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, monto_feriado, indem_anos):
+    doc = Document()
+    
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_title = p_title.add_run("COMPROBANTE DE FINIQUITO DE CONTRATO DE TRABAJO")
+    run_title.bold = True
+    run_title.font.size = Pt(14)
+    
+    doc.add_paragraph()
+    doc.add_paragraph(f"En Linares, a fecha de hoy, comparecen por una parte la empresa {empresa}, RUT N° {rut_empresa}, representada legalmente por Don/Doña Representante Legal, y por la otra parte el/la trabajador/a Don/Doña {nombre_trabajador}, RUT N° {rut_trabajador}, quienes acuerdan poner término al contrato de trabajo bajo las siguientes estipulaciones:")
+    
+    doc.add_paragraph(f"PRIMERO: El presente contrato termina por la causal establecida en el {causal}.")
+    doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
+    doc.add_paragraph(f"• Remuneración días trabajados en el mes: ${monto_dias:,.0f}")
+    doc.add_paragraph(f"• Feriado Proporcional: ${monto_feriado:,.0f}")
+    doc.add_paragraph(f"• Indemnización por Años de Servicio: ${indem_anos:,.0f}")
+    
+    total_finiquito = monto_dias + monto_feriado + indem_anos
+    p_tot = doc.add_paragraph()
+    run_tot = p_tot.add_run(f"TOTAL A PAGAR: ${total_finiquito:,.0f}")
+    run_tot.bold = True
+    
+    doc.add_paragraph("TERCERO: El/la trabajador/a declara recibir a su entera satisfacción el pago indicado, sin tener cargo ni reclamación posterior alguna que formular.")
+    
+    doc.add_paragraph("\n\n__________________________________\nFirma Empleador")
+    doc.add_paragraph("__________________________________\nFirma Trabajador/a")
+    
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+    return output.getvalue()
+
 # ==========================================================
 # 2. NAVEGACIÓN DE LA PLATAFORMA CORPORATIVA
 # ==========================================================
@@ -179,17 +201,15 @@ menu = st.sidebar.selectbox("Selecciona una opción", ["Gestión de Clientes", "
 
 if menu == "Gestión de Clientes":
     st.header("📂 Directorio de Empresas Clientes")
-    st.markdown("Administra los datos maestros de las empresas de la oficina contable.")
     with st.form("form_cliente"):
-        nombre_cliente = st.text_input("Razón Social (Ej. Uniriego SpA)")
+        nombre_cliente = st.text_input("Razón Social (Ej. Formula Center SpA)")
         rut_cliente = st.text_input("RUT Empresa")
-        sector = st.selectbox("Sector Económico", ["Transporte", "Agrícola", "Importación / Retail", "Servicios"])
-        if st.form_submit_button("Guardar Cliente en Directorio") and nombre_cliente:
-            st.success(f"¡Empresa '{nombre_cliente}' guardada exitosamente!")
+        if st.form_submit_button("Guardar Cliente") and nombre_cliente:
+            st.success(f"¡Empresa '{nombre_cliente}' guardada!")
 
 elif menu == "Procesar Previred & Excel":
     st.header("⚡ Automatización de Planillas Multicliente")
-    selected_month = st.selectbox("Selecciona el Mes a Procesar", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
+    selected_month = st.selectbox("Mes a Procesar", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
     
     col_a, col_b = st.columns(2)
     with col_a:
@@ -199,10 +219,7 @@ elif menu == "Procesar Previred & Excel":
 
     if pdf_file and template_file:
         df_extracted = extract_pdf_data(pdf_file.getvalue())
-        st.subheader("📊 Datos Extraídos del Previred:")
         st.dataframe(df_extracted, use_container_width=True)
-        
-        st.warning(f"⚠️ **Control para el mes de {selected_month}:** Revisa y ajusta cargas o bonos si es necesario.")
         cargas_dict = {}
         bonos_dict = {}
         for _, row in df_extracted.iterrows():
@@ -216,88 +233,91 @@ elif menu == "Procesar Previred & Excel":
             
         if st.button("🚀 Rellenar Planilla Oficial del Mes", type="primary"):
             final_excel = write_to_excel(template_file.getvalue(), df_extracted, selected_month, cargas_dict, bonos_dict)
-            st.success("¡Planilla generada con éxito absoluto y aportes patronales alineados!")
-            st.download_button(
-                label="📥 Descargar Libro de Remuneraciones Actualizado",
-                data=final_excel,
-                file_name=f"Remuneraciones_{selected_month}_Actualizado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+            st.success("¡Planilla generada con éxito!")
+            st.download_button("📥 Descargar Libro Actualizado", data=final_excel, file_name=f"Remuneraciones_{selected_month}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 elif menu == "Calculadora y Finiquitos DT":
-    st.header("⚖️ Simulador y Cálculo de Finiquitos (Normativa Chilena)")
-    st.markdown("Calcula indemnizaciones, feriado proporcional y evalúa la causal de despido más conveniente para el empleador.")
+    st.header("⚖️ Simulador, Cálculo y Redacción de Finiquitos")
+    
+    modo_trabajador = st.radio("📂 Selecciona el Origen de los Datos del Trabajador", ["Trabajador Libre / Fuera de Base de Datos", "Seleccionar de Base de Datos Cliente"])
+    
+    if modo_trabajador == "Trabajador Libre / Fuera de Base de Datos":
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            nombre_trab = st.text_input("👤 Nombre Completo del Trabajador", value="María González")
+            rut_trab = st.text_input("🆔 RUT del Trabajador", value="15.123.456-7")
+            fecha_inicio = st.date_input("📅 Fecha de Inicio de Contrato")
+        with col_w2:
+            empresa_nombre = st.text_input("🏢 Razón Social Empleador", value="Empresa Externa / Asesoría")
+            empresa_rut = st.text_input("🆔 RUT Empleador", value="76.123.456-8")
+            fecha_termino = st.date_input("📅 Fecha de Término / Despido")
+    else:
+        st.info("ℹ️ Módulo vinculado a la base de clientes actual (Formula Center SpA).")
+        nombre_trab = st.selectbox("Seleccionar Trabajador", ["Rodolfo Álvarez", "Martín Cabrera", "Nicolás Contreras", "Rodrigo Leiva", "Anggie Medina", "David Urrutia"])
+        rut_trab = "13.599.716-1"
+        empresa_nombre = "Formula Center SpA"
+        empresa_rut = "77.597.719-1"
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            fecha_inicio = st.date_input("📅 Fecha de Inicio", value=pd.to_datetime("2024-01-01").date())
+        with col_w2:
+            fecha_termino = st.date_input("📅 Fecha de Término")
 
     col1, col2 = st.columns(2)
     with col1:
-        fecha_inicio = st.date_input("📅 Fecha de Inicio de Contrato")
-        fecha_termino = st.date_input("📅 Fecha de Término / Despido")
-        metodo_promedio = st.radio("🔍 Base de Cálculo de Remuneración", ["Promedio Últimos 3 Meses", "Promedio Últimos 6 Meses"])
+        sueldo_base = st.number_input("💵 Sueldo Base Mensual ($)", min_value=0, value=700000, step=10000)
+        gratificacion = st.number_input("🎁 Gratificación Mensual ($)", min_value=0, value=180000, step=5000)
+        metodo_promedio = st.radio("🔍 Base de Cálculo", ["Promedio Últimos 3 Meses", "Promedio Últimos 6 Meses"])
     with col2:
-        sueldo_base = st.number_input("💵 Sueldo Base Mensual ($)", min_value=0, value=650000, step=10000)
-        gratificacion = st.number_input("🎁 Gratificación Mensual (Tope Art. 47) ($)", min_value=0, value=150000, step=5000)
-        dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes del Despido", min_value=0, max_value=30, value=15)
+        dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes del Despido", min_value=0, max_value=30, value=10)
+        causal = st.selectbox("📋 Causal de Término", [
+            "Art. 161 N° 1 - Necesidades de la Empresa (Con Aviso)",
+            "Art. 161 N° 1 - Necesidades de la Empresa (Sin Aviso / Sustitutiva)",
+            "Art. 159 N° 1 - Mutuo Acuerdo",
+            "Art. 159 N° 2 - Renuncia Voluntaria",
+            "Art. 160 - Causales de Caducidad"
+        ])
 
-    causal = st.selectbox("📋 Causal de Término de Contrato", [
-        "Art. 161 N° 1 - Necesidades de la Empresa (Con Aviso Previo)",
-        "Art. 161 N° 1 - Necesidades de la Empresa (Indemnización Sustitutiva / Sin Aviso)",
-        "Art. 159 N° 1 - Mutuo Acuerdo de las Partes",
-        "Art. 159 N° 2 - Renuncia Voluntaria del Trabajador",
-        "Art. 160 - Causales Caducidad (Sin derecho a indemnización)"
-    ])
-
-    if st.button("📊 Calcular Finiquito y Evaluar Escenarios", type="primary"):
-        # Cálculos de tiempo
+    if st.button("📊 Calcular y Generar Documento Word", type="primary"):
         delta_dias = (fecha_termino - fecha_inicio).days
         anos_servicio = delta_dias / 365.25
         anos_enteros = int(anos_servicio)
         
-        # Feriado proporcional (1.25 días hábiles por mes trabajado)
         meses_trabajados = delta_dias / 30.416
         dias_feriado_habiles = meses_trabajados * 1.25
-        # Conversión estimada a días corridos (considerando proporción de fines de semana)
         dias_feriado_corridos = dias_feriado_habiles * (7 / 5)
 
         base_calculo = sueldo_base + gratificacion
         rem_diaria = base_calculo / 30
         
-        # Remuneración proporcional por días trabajados en el mes
         monto_dias_trabajados = rem_diaria * dias_pendientes
         monto_feriado = rem_diaria * dias_feriado_corridos
+        indem_anos = base_calculo * anos_enteros if "161" in causal or "Mutuo" in causal else 0
 
         st.markdown("---")
-        st.subheader("📑 Resultados del Cálculo Detallado")
+        st.subheader("📑 Resultados del Cálculo")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Antigüedad", f"{anos_enteros} años")
+            st.metric("Base Cálculo ({})".format(metodo_promedio), f"${base_calculo:,.0f}")
+        with c2:
+            st.metric("Días Trabajados", f"${monto_dias_trabajados:,.0f}")
+            st.metric("Feriado Proporcional", f"${monto_feriado:,.0f}")
+        with c3:
+            st.metric("Años de Servicio", f"${indem_anos:,.0f}")
 
-        col_res1, col_res2, col_res3 = st.columns(3)
-        with col_res1:
-            st.metric("Antigüedad", f"{anos_enteros} años y {int((anos_servicio - anos_enteros)*12)} meses")
-            st.metric("Base de Cálculo", f"${base_calculo:,.0f} ({metodo_promedio})")
-        with col_res2:
-            st.metric("Remuneración Días Trabajados", f"${monto_dias_trabajados:,.0f}")
-            st.metric("Feriado Proporcional", f"${monto_feriado:,.0f} ({dias_feriado_habiles:.1f} días hábiles)")
-        with col_res3:
-            indem_anos = base_calculo * anos_enteros if "161" in causal or "Mutuo" in causal else 0
-            st.metric("Indemnización Años de Servicio", f"${indem_anos:,.0f}")
-
-        # Alertas AFC
+        word_bytes = generate_finiquito_word(nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, base_calculo, dias_pendientes, monto_dias_trabajados, monto_feriado, indem_anos)
+        
         st.markdown("---")
-        if "161" in causal:
-            st.success("✅ **Alerta AFC (Art. 161):** Procedente el descuento del aporte del empleador acumulado en la Cuenta Individual por Cesantía.")
-        else:
-            st.warning("⚠️ **Alerta AFC:** Para esta causal **NO** procede descontar el saldo de la AFC del empleador. El fondo pertenece íntegramente al trabajador.")
-
-        # Recomendación de Escenarios
-        st.markdown("### 💡 Recomendación Estratégica para el Empleador")
-        if "161" in causal:
-            st.info("""
-            * **Comparativa de Costos:** Si otorgas la carta con 30 días de anticipación, te ahorras el pago de la Indemnización Sustitutiva (Mes de Aviso). 
-            * **Alternativa de Mutuo Acuerdo:** Si evalúas negociar con el trabajador un acuerdo mutuo, recuerda que las indemnizaciones por años de servicio pueden pactarse libremente, pero tributan por sobre las 90 UF por año de servicio.
-            """)
-        else:
-            st.info("Para renuncias voluntarias o causales del Art. 160, el costo fiscal se limita estrictamente a los días proporcionales y feriado acumulado.")
+        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito!")
+        st.download_button(
+            label="📥 Descargar Finiquito Oficial en Word (.docx)",
+            data=word_bytes,
+            file_name=f"Finiquito_{nombre_trab.replace(' ', '_')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
 
 elif menu == "Dashboard Analítico":
-    st.header("📈 Analítica y Auditoría de Planillas")
-    st.markdown("Métricas globales de costos previsionales y masa salarial de la cartera de clientes.")
-    st.info("Aquí visualizaremos los gráficos de evolución de aportes patronales y sueldos imponibles mes a mes.")
+    st.header("📈 Analítica y Auditoría")
+    st.info("Visualización de métricas y costos previsionales.")
