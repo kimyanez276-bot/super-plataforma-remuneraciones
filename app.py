@@ -164,22 +164,31 @@ def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, c
     output.seek(0)
     return output.getvalue()
 
-def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, total_feriado_pesos, total_dias_feriado_habiles, total_dias_feriado_corridos, indem_anos):
+def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, monto_dias, total_feriado_pesos, indem_anos):
     doc = Document()
     
+    # Membrete solicitado
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_title = p_title.add_run("COMPROBANTE DE FINIQUITO DE CONTRATO DE TRABAJO")
+    run_title = p_title.add_run("FINIQUITO DE CONTRATO DE TRABAJO")
     run_title.bold = True
     run_title.font.size = Pt(14)
     
     doc.add_paragraph()
-    doc.add_paragraph(f"En Linares, a fecha de hoy, comparecen por una parte la empresa {empresa}, RUT N° {rut_empresa}, representada legalmente por Don/Doña Representante Legal, y por la otra parte el/la trabajador/a Don/Doña {nombre_trabajador}, RUT N° {rut_trabajador}, quienes acuerdan poner término al contrato de trabajo bajo las siguientes estipulaciones:")
     
-    doc.add_paragraph(f"PRIMERO: El presente contrato termina por la causal establecida en el {causal}.")
-    doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
-    doc.add_paragraph(f"• Remuneración días trabajados en el mes ({dias_trab} días): ${formato_cl(monto_dias)}")
-    doc.add_paragraph(f"• Feriado Proporcional ({total_dias_feriado_habiles} días hábiles / {total_dias_feriado_corridos:.1f} días corridos): ${formato_cl(total_feriado_pesos)}")
+    # Fecha en blanco y párrafos justificados
+    p_comp = doc.add_paragraph(f"En Linares, a ____ de ____________________ de 20___, comparecen por una parte la empresa {empresa}, RUT N° {rut_empresa}, representada legalmente por Don/Doña Representante Legal, y por la otra parte el/la trabajador/a Don/Doña {nombre_trabajador}, RUT N° {rut_trabajador}, quienes acuerdan poner término al contrato de trabajo bajo las siguientes estipulaciones:")
+    p_comp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    p_prim = doc.add_paragraph(f"PRIMERO: El presente contrato termina por la causal establecida en el {causal}.")
+    p_prim.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    p_sec = doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
+    p_sec.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    # Sin días en el word, solo los montos limpios
+    doc.add_paragraph(f"• Remuneración días trabajados en el mes: ${formato_cl(monto_dias)}")
+    doc.add_paragraph(f"• Feriado Proporcional: ${formato_cl(total_feriado_pesos)}")
     doc.add_paragraph(f"• Indemnización por Años de Servicio: ${formato_cl(indem_anos)}")
     
     total_finiquito = monto_dias + total_feriado_pesos + indem_anos
@@ -187,7 +196,8 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     run_tot = p_tot.add_run(f"TOTAL A PAGAR: ${formato_cl(total_finiquito)}")
     run_tot.bold = True
     
-    doc.add_paragraph("TERCERO: El/la trabajador/a declara recibir a su entera satisfacción el pago indicado, sin tener cargo ni reclamación posterior alguna que formular.")
+    p_terc = doc.add_paragraph("TERCERO: El/la trabajador/a declara recibir a su entera satisfacción el pago indicado, sin tener cargo ni reclamación posterior alguna que formular.")
+    p_terc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     
     doc.add_paragraph()
     
@@ -339,13 +349,11 @@ elif menu == "Calculadora y Finiquitos DT":
         st.markdown("---")
         st.subheader("📑 Resultados Detallados del Cálculo (Normativa DT)")
         
-        # 💡 Bloque explicativo detallado en formato texto estructurado (sin cortes)
         st.markdown(f"""
         > **Resumen del Trabajador:** {nombre_trab} | **Antigüedad:** {anos_enteros} años ({delta_dias} días corridos)  
         > **Base de Cálculo ({metodo_promedio}):** Sueldo Base (${formato_cl(sueldo_base)}) + Gratificación (${formato_cl(gratificacion)}) = **${formato_cl(base_calculo)}** mensual (${formato_cl(rem_diaria)} diarios).
         """)
 
-        # Columnas de resultados limpios con formato de puntos y desglose completo
         res_c1, res_c2 = st.columns(2)
         with res_c1:
             st.markdown(f"""
@@ -370,12 +378,11 @@ elif menu == "Calculadora y Finiquitos DT":
 
         word_bytes = generate_finiquito_word(
             nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, 
-            base_calculo, dias_pendientes, monto_dias_trabajados, 
-            monto_feriado, dias_vacaciones_pendientes, dias_feriado_corridos, indem_anos
+            monto_dias_trabajados, monto_feriado, indem_anos
         )
         
         st.markdown("---")
-        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito con puntos en los montos y firmas paralelas!")
+        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito con formato limpio, fecha en blanco y texto justificado!")
         st.download_button(
             label="📥 Descargar Finiquito Oficial en Word (.docx)",
             data=word_bytes,
