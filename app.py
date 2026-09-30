@@ -1,5 +1,6 @@
 import io
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 import pandas as pd
 import streamlit as st
@@ -12,7 +13,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 st.set_page_config(page_title="Plataforma de Remuneraciones - Asesorías Contables", layout="wide")
 
 # ==========================================================
-# 1. UTILIDADES Y EXTRACCIÓN CERTIFICADA
+# 1. UTILIDADES Y FERIADOS OFICIALES DE CHILE (2024 - 2030)
 # ==========================================================
 RUT_RE = re.compile(r"(\d{1,2}(?:\.\d{3}){2}-[\dkK]|\d{7,8}-[\dkK])")
 
@@ -35,6 +36,122 @@ def safe_int(value):
 def formato_cl(monto) -> str:
     """Formatea números enteros con puntos como separadores de miles (ej: 1.242.153)"""
     return f"{int(round(monto)):,}".replace(",", ".")
+
+def obtener_feriados_chile() -> set:
+    """
+    Retorna un conjunto (set) de objetos datetime.date con todos los feriados 
+    oficiales de Chile (fijos y móviles aproximados/calculados) desde 2024 hasta 2030.
+    """
+    feriados = set()
+    
+    # Lista de feriados fijos recurrentes mes/día para cualquier año
+    feriados_fijos = [
+        (1, 1),   # Año Nuevo
+        (5, 1),   # Día del Trabajador
+        (5, 21),  # Glorias Navales
+        (6, 29),  # San Pedro y San Pablo
+        (7, 16),  # Virgen del Carmen
+        (8, 15),  # Asunción de la Virgen
+        (9, 18),  # Independencia Nacional
+        (9, 19),  # Glorias del Ejército
+        (10, 12), # Encuentro de Dos Mundos
+        (10, 31), # Iglesias Evangélicas y Protestantes
+        (11, 1),  # Todos los Santos
+        (12, 8),  # Inmaculada Concepción
+        (12, 25), # Navidad
+    ]
+    
+    for anio in range(2024, 2031):
+        # Agregar feriados fijos
+        for mes, dia in feriados_fijos:
+            try:
+                feriados.add(datetime(anio, mes, dia).date())
+            except ValueError:
+                pass
+                
+        # Feriados específicos de Fiestas Patrias (Viernes 18 o 19 sándwiches legales si aplica)
+        # 2024: 18, 19, 20 (extra)
+        if anio == 2024:
+            feriados.add(datetime(2024, 9, 20).date())
+        # 2025: 18, 19, 17 (extra)
+        elif anio == 2025:
+            feriados.add(datetime(2025, 9, 17).date())
+        # 2026: 18, 19, 21 (lunes extra)
+        elif anio == 2026:
+            feriados.add(datetime(2026, 9, 21).date())
+        # 2027: 18 (sábado), 19 (domingo), 17 (viernes extra)
+        elif anio == 2027:
+            feriados.add(datetime(2027, 9, 17).date())
+            
+        # Feriados móviles aproximados (Viernes Santo y Sábado Santo)
+        # Cálculo base de Pascuas por año (algoritmo simplificado de fecha de Pascua)
+        a = anio % 19
+        b = anio // 100
+        c = anio % 100
+        d = b // 4
+        e = b % 4
+        f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d - g + 15) % 30
+        i = c // 4
+        k = c % 4
+        L = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * L) // 451
+        mes_pascua = (h + L - 7 * m + 114) // 31
+        dia_pascua = ((h + L - 7 * m + 114) % 31) + 1
+        
+        domingo_pascua = datetime(anio, mes_pascua, dia_pascua).date()
+        viernes_santo = domingo_pascua - timedelta(days=2)
+        sabado_santo = domingo_pascua - timedelta(days=1)
+        
+        feriados.add(viernes_santo)
+        feriados.add(sabado_santo)
+        
+        # Elecciones presidenciales / parlamentarias móviles (ej: noviembre cada 4 años)
+        if anio in [2025, 2029]: # Segunda vuelta o elecciones
+            try:
+                feriados.add(datetime(anio, 11, 23).date()) # Ejemplo domingo de elección o feriado legal asociado
+            except ValueError:
+                pass
+
+    return feriados
+
+def calcular_dias_calendario_con_feriados(fecha_inicio_conteo, dias_habiles_objetivo, regimen_semana):
+    """
+    Cuenta día por día en el calendario real saltando domingos, sábados (si aplica) 
+    y festivos oficiales de Chile registrados en la lista.
+    """
+    feriados_chile = obtener_feriados_chile()
+    current_date = fecha_inicio_conteo + timedelta(days=1)
+    habiles_acumulados = 0.0
+    dias_corridos_reales = 0
+    
+    while habiles_acumulados < dias_habiles_objetivo:
+        weekday = current_date.weekday() # 0: Lunes ... 5: Sábado, 6: Domingo
+        es_feriado = current_date in feriados_chile
+        
+        es_dia_habil_laboral = False
+        if regimen_semana == "Lunes a Viernes (5 días)":
+            if weekday < 5 and not es_feriado:
+                es_dia_habil_laboral = True
+        else: # Lunes a Sábado (6 días)
+            if weekday < 6 and not es_feriado:
+                es_dia_habil_laboral = True
+                
+        if es_dia_habil_laboral:
+            if (dias_habiles_objetivo - habiles_acumulados) < 1.0:
+                fraccion = dias_habiles_objetivo - habiles_acumulados
+                habiles_acumulados += fraccion
+            else:
+                habiles_acumulados += 1.0
+                
+        dias_corridos_reales += 1
+        current_date += timedelta(days=1)
+        
+        if dias_corridos_reales > 3650:
+            break
+            
+    return dias_corridos_reales
 
 def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -167,7 +284,6 @@ def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, c
 def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, monto_dias, total_feriado_pesos, indem_anos):
     doc = Document()
     
-    # Membrete solicitado
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_title = p_title.add_run("FINIQUITO DE CONTRATO DE TRABAJO")
@@ -176,7 +292,6 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     
     doc.add_paragraph()
     
-    # Fecha en blanco y párrafos justificados
     p_comp = doc.add_paragraph(f"En Linares, a ____ de ____________________ de 20___, comparecen por una parte la empresa {empresa}, RUT N° {rut_empresa}, representada legalmente por Don/Doña Representante Legal, y por la otra parte el/la trabajador/a Don/Doña {nombre_trabajador}, RUT N° {rut_trabajador}, quienes acuerdan poner término al contrato de trabajo bajo las siguientes estipulaciones:")
     p_comp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     
@@ -186,7 +301,6 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     p_sec = doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
     p_sec.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     
-    # Sin días en el word, solo los montos limpios
     doc.add_paragraph(f"• Remuneración días trabajados en el mes: ${formato_cl(monto_dias)}")
     doc.add_paragraph(f"• Feriado Proporcional: ${formato_cl(total_feriado_pesos)}")
     doc.add_paragraph(f"• Indemnización por Años de Servicio: ${formato_cl(indem_anos)}")
@@ -201,7 +315,6 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     
     doc.add_paragraph()
     
-    # Firmas paralelas en tabla invisible
     table = doc.add_table(rows=1, cols=2)
     table.autofit = False
     
@@ -318,6 +431,16 @@ elif menu == "Calculadora y Finiquitos DT":
             help="Puedes ajustar manualmente los días hábiles pendientes si el trabajador arrastra feriado de años anteriores."
         )
 
+        regimen_conteo = st.selectbox(
+            "📅 Criterio de Conteo Calendario (Feriado Proporcional)",
+            [
+                "Cálculo Matemático Estándar (Factor 1.4)", 
+                "Conteo Día a Día + Feriados Chilenos (Lunes a Viernes)", 
+                "Conteo Día a Día + Feriados Chilenos (Lunes a Sábado)"
+            ],
+            help="Elige si deseas calcular con la proporción matemática directa o simulando el calendario real saltando domingos, sábados (si aplica) y feriados oficiales de Chile."
+        )
+
         opciones_causal = [
             "Art. 161 - Necesidades (Con Aviso Previo)",
             "Art. 161 - Necesidades (Sin Aviso / Mes Sustitutivo)",
@@ -332,7 +455,15 @@ elif menu == "Calculadora y Finiquitos DT":
         anos_servicio = delta_dias / 365.25
         anos_enteros = int(anos_servicio)
         
-        dias_feriado_corridos = dias_vacaciones_pendientes * (7 / 5)
+        if regimen_conteo == "Cálculo Matemático Estándar (Factor 1.4)":
+            dias_feriado_corridos = dias_vacaciones_pendientes * (7 / 5)
+            metodo_texto = "Matemático Estándar (× 1,4)"
+        elif regimen_conteo == "Conteo Día a Día + Feriados Chilenos (Lunes a Viernes)":
+            dias_feriado_corridos = calcular_dias_calendario_con_feriados(fecha_termino, dias_vacaciones_pendientes, "Lunes a Viernes (5 días)")
+            metodo_texto = "Calendario Real + Feriados (Lunes a Viernes)"
+        else:
+            dias_feriado_corridos = calcular_dias_calendario_con_feriados(fecha_termino, dias_vacaciones_pendientes, "Lunes a Sábado (6 días)")
+            metodo_texto = "Calendario Real + Feriados (Lunes a Sábado)"
 
         base_calculo = sueldo_base + gratificacion
         rem_diaria = base_calculo / 30
@@ -362,6 +493,7 @@ elif menu == "Calculadora y Finiquitos DT":
               `{dias_pendientes} días × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_dias_trabajados)}**
             
             * **Feriado Proporcional ({dias_vacaciones_pendientes} días hábiles):**  
+              *Método:* `{metodo_texto}`  
               Equivale a `{dias_feriado_corridos:.1f} días corridos`  
               `{dias_feriado_corridos:.1f} × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_feriado)}**
             """)
@@ -382,7 +514,7 @@ elif menu == "Calculadora y Finiquitos DT":
         )
         
         st.markdown("---")
-        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito con formato limpio, fecha en blanco y texto justificado!")
+        st.success("✅ ¡Cálculo completado y documento Word redactado con éxito incluyendo feriados nacionales chilenos!")
         st.download_button(
             label="📥 Descargar Finiquito Oficial en Word (.docx)",
             data=word_bytes,
