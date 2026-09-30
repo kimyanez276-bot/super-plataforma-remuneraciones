@@ -34,7 +34,7 @@ def safe_int(value):
 
 def formato_cl(monto) -> str:
     """Formatea números enteros con puntos como separadores de miles (ej: 1.242.153)"""
-    return f"{int(monto):,}".replace(",", ".")
+    return f"{int(round(monto)):,}".replace(",", ".")
 
 def extract_pdf_data(pdf_bytes: bytes) -> pd.DataFrame:
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -334,23 +334,39 @@ elif menu == "Calculadora y Finiquitos DT":
         if "161" in causal or "Mutuo" in causal:
             indem_anos = base_calculo * anos_enteros
 
+        total_finiquito = monto_dias_trabajados + monto_feriado + indem_anos
+
         st.markdown("---")
-        st.subheader("📑 Resultados del Cálculo (Montos en formato oficial)")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Antigüedad", f"{anos_enteros} años")
-            st.metric("Base Cálculo", f"${formato_cl(base_calculo)}")
-        with c2:
-            st.metric("Días Trabajados", f"${formato_cl(monto_dias_trabajados)}")
-            # 💡 Feriado proporcional con el desglose de días visible en pantalla
-            st.metric(
-                "Feriado Proporcional", 
-                f"${formato_cl(monto_feriado)}", 
-                delta=f"{dias_vacaciones_pendientes} días hábiles / {dias_feriado_corridos:.1f} corridos",
-                delta_color="off"
-            )
-        with c3:
-            st.metric("Años de Servicio", f"${formato_cl(indem_anos)}")
+        st.subheader("📑 Resultados Detallados del Cálculo (Normativa DT)")
+        
+        # 💡 Bloque explicativo detallado en formato texto estructurado (sin cortes)
+        st.markdown(f"""
+        > **Resumen del Trabajador:** {nombre_trab} | **Antigüedad:** {anos_enteros} años ({delta_dias} días corridos)  
+        > **Base de Cálculo ({metodo_promedio}):** Sueldo Base (${formato_cl(sueldo_base)}) + Gratificación (${formato_cl(gratificacion)}) = **${formato_cl(base_calculo)}** mensual (${formato_cl(rem_diaria)} diarios).
+        """)
+
+        # Columnas de resultados limpios con formato de puntos y desglose completo
+        res_c1, res_c2 = st.columns(2)
+        with res_c1:
+            st.markdown(f"""
+            ### 💼 Prestaciones Principales
+            * **Días Trabajados en el Mes ({dias_pendientes} días):**  
+              `{dias_pendientes} días × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_dias_trabajados)}**
+            
+            * **Feriado Proporcional ({dias_vacaciones_pendientes} días hábiles):**  
+              Equivale a `{dias_feriado_corridos:.1f} días corridos`  
+              `{dias_feriado_corridos:.1f} × ${formato_cl(rem_diaria)}` = **${formato_cl(monto_feriado)}**
+            """)
+        with res_c2:
+            st.markdown(f"""
+            ### ⚖️ Indemnizaciones y Total
+            * **Indemnización Años de Servicio ({anos_enteros} años):**  
+              `{anos_enteros} años × ${formato_cl(base_calculo)}` = **${formato_cl(indem_anos)}**
+            
+            ---
+            ### 💰 TOTAL A PAGAR EN FINIQUITO
+            ### **${formato_cl(total_finiquito)}**
+            """)
 
         word_bytes = generate_finiquito_word(
             nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, 
