@@ -164,7 +164,7 @@ def write_to_excel(template_bytes: bytes, df: pd.DataFrame, target_month: str, c
     output.seek(0)
     return output.getvalue()
 
-def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, total_feriado_pesos, total_dias_feriado_corridos, indem_anos):
+def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empresa, causal, base_calc, dias_trab, monto_dias, total_feriado_pesos, total_dias_feriado_habiles, total_dias_feriado_corridos, indem_anos):
     doc = Document()
     
     p_title = doc.add_paragraph()
@@ -179,7 +179,7 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     doc.add_paragraph(f"PRIMERO: El presente contrato termina por la causal establecida en el {causal}.")
     doc.add_paragraph("SEGUNDO: Las partes dejan constancia que el monto total de las prestaciones adeudadas y calculadas es el siguiente:")
     doc.add_paragraph(f"• Remuneración días trabajados en el mes ({dias_trab} días): ${formato_cl(monto_dias)}")
-    doc.add_paragraph(f"• Feriado Proporcional ({total_dias_feriado_corridos:.1f} días corridos): ${formato_cl(total_feriado_pesos)}")
+    doc.add_paragraph(f"• Feriado Proporcional ({total_dias_feriado_habiles} días hábiles / {total_dias_feriado_corridos:.1f} días corridos): ${formato_cl(total_feriado_pesos)}")
     doc.add_paragraph(f"• Indemnización por Años de Servicio: ${formato_cl(indem_anos)}")
     
     total_finiquito = monto_dias + total_feriado_pesos + indem_anos
@@ -189,9 +189,9 @@ def generate_finiquito_word(nombre_trabajador, rut_trabajador, empresa, rut_empr
     
     doc.add_paragraph("TERCERO: El/la trabajador/a declara recibir a su entera satisfacción el pago indicado, sin tener cargo ni reclamación posterior alguna que formular.")
     
-    doc.add_paragraph() # Espacio
+    doc.add_paragraph()
     
-    # Firmas paralelas en tabla invisible (1 fila, 2 celdas)
+    # Firmas paralelas en tabla invisible
     table = doc.add_table(rows=1, cols=2)
     table.autofit = False
     
@@ -298,15 +298,14 @@ elif menu == "Calculadora y Finiquitos DT":
     with col2:
         dias_pendientes = st.number_input("⏰ Días Trabajados en el Mes", min_value=0, max_value=30, value=10)
         
-        # 🏖️ Control manual de vacaciones proporcionales y pendientes
         delta_dias_gen = (fecha_termino - fecha_inicio).days
         meses_trab_gen = max(0, delta_dias_gen / 30.416)
         feriado_proporcional_calculado = meses_trab_gen * 1.25
         
         dias_vacaciones_pendientes = st.number_input(
-            "🏖️ Días Hábiles de Vacaciones Acumuladas / Pendientes (Ingresar Manual)", 
+            "🏖️ Días Hábiles de Vacaciones Acumuladas / Pendientes (Editable)", 
             min_value=0.0, value=float(round(feriado_proporcional_calculado, 1)), step=0.5,
-            help="El sistema calcula el proporcional por el tiempo trabajado, pero puedes ajustarlo manualmente si el trabajador tiene días pendientes de años anteriores."
+            help="Puedes ajustar manualmente los días hábiles pendientes si el trabajador arrastra feriado de años anteriores."
         )
 
         opciones_causal = [
@@ -323,7 +322,6 @@ elif menu == "Calculadora y Finiquitos DT":
         anos_servicio = delta_dias / 365.25
         anos_enteros = int(anos_servicio)
         
-        # Conversión de días hábiles de vacaciones a días corridos para el pago
         dias_feriado_corridos = dias_vacaciones_pendientes * (7 / 5)
 
         base_calculo = sueldo_base + gratificacion
@@ -344,14 +342,20 @@ elif menu == "Calculadora y Finiquitos DT":
             st.metric("Base Cálculo", f"${formato_cl(base_calculo)}")
         with c2:
             st.metric("Días Trabajados", f"${formato_cl(monto_dias_trabajados)}")
-            st.metric("Feriado Proporcional", f"${formato_cl(monto_feriado)} ({dias_vacaciones_pendientes} días hábiles)")
+            # 💡 Feriado proporcional con el desglose de días visible en pantalla
+            st.metric(
+                "Feriado Proporcional", 
+                f"${formato_cl(monto_feriado)}", 
+                delta=f"{dias_vacaciones_pendientes} días hábiles / {dias_feriado_corridos:.1f} corridos",
+                delta_color="off"
+            )
         with c3:
             st.metric("Años de Servicio", f"${formato_cl(indem_anos)}")
 
         word_bytes = generate_finiquito_word(
             nombre_trab, rut_trab, empresa_nombre, empresa_rut, causal, 
             base_calculo, dias_pendientes, monto_dias_trabajados, 
-            monto_feriado, dias_feriado_corridos, indem_anos
+            monto_feriado, dias_vacaciones_pendientes, dias_feriado_corridos, indem_anos
         )
         
         st.markdown("---")
